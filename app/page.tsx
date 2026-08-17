@@ -8,6 +8,7 @@ import { ComposeV2 } from "@/components/sections/compose-variants";
 import { FindingsV2 } from "@/components/sections/findings-variants";
 import { FooterV2 } from "@/components/sections/footer-variants";
 import { PrivacyBanner } from "@/components/privacy-banner";
+import { DigistoriesCta } from "@/components/digistories-cta";
 import type {
   ScoreResult,
   ScoringInput,
@@ -193,6 +194,7 @@ export default function Home() {
             <FindingsV2 result={result} applySuggestion={applySuggestion} />
           </div>
         )}
+        {result && <DigistoriesCta />}
         <FooterV2 />
       </div>
 
