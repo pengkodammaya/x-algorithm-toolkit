@@ -1,25 +1,22 @@
 import { z } from "zod";
 
 const Env = z.object({
-  OPENROUTER_API_KEY: z.string().min(10, "OPENROUTER_API_KEY required"),
-  OPENROUTER_SCORER_MODEL: z
-    .string()
-    .default("arcee-ai/trinity-large-thinking:free"),
-  OPENROUTER_FALLBACK_MODELS: z
-    .string()
-    .default(""),
+  // z.ai (GLM) key. Server-funded scoring runs on the free GLM model below,
+  // so this is the only secret the app needs to run.
+  GLM_API_KEY: z.string().min(10, "GLM_API_KEY required"),
 
-  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
-  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
-
-  CACHE_HMAC_SECRET: z.string().min(32, "CACHE_HMAC_SECRET must be ≥32 bytes"),
-
-  TURNSTILE_SECRET_KEY: z.string().optional(),
-  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
-  CRON_SECRET: z.string().min(32).optional(),
+  // Funnel target (public). Optional — the /go route has a sane default.
+  NEXT_PUBLIC_DIGISTORIES_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof Env>;
+
+// z.ai OpenAI-compatible endpoint. https://docs.z.ai/guides/overview/quick-start
+export const GLM_BASE_URL = "https://api.z.ai/api/paas/v4";
+
+// Free tier ($0 in/out). Bump to "glm-4.6" for stronger judgments
+// (~$0.004/score) — single-line change, no env var needed.
+export const GLM_MODEL = "glm-4.5-flash";
 
 let cached: Env | undefined;
 
@@ -34,25 +31,4 @@ export function env(): Env {
   }
   cached = parsed.data;
   return cached;
-}
-
-export function fallbackModelList(): string[] {
-  return env()
-    .OPENROUTER_FALLBACK_MODELS.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-export function rateLimitConfigured(): boolean {
-  const e = env();
-  return Boolean(e.UPSTASH_REDIS_REST_URL && e.UPSTASH_REDIS_REST_TOKEN);
-}
-
-export function turnstileConfigured(): boolean {
-  const e = env();
-  return Boolean(
-    e.TURNSTILE_SECRET_KEY &&
-      e.NEXT_PUBLIC_TURNSTILE_SITE_KEY &&
-      rateLimitConfigured(),
-  );
 }

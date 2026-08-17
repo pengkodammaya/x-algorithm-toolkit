@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
+import { checkBotId } from "botid/server";
 import { z } from "zod";
 import crypto from "node:crypto";
-import { env } from "@/lib/env";
 import { log } from "@/lib/infra/logger";
-import { checkRateLimit } from "@/lib/infra/ratelimit";
-import { cacheGet, cacheKey, cacheSet } from "@/lib/infra/cache";
-import { turnstileGate } from "@/lib/infra/turnstile";
 import { runHardFilters } from "@/lib/scoring/hardFilters";
 import { extractContentSignals } from "@/lib/scoring/contentSignals";
 import { extractContextSignals } from "@/lib/scoring/contextSignals";
@@ -152,6 +149,16 @@ export async function POST(req: Request): Promise<Response> {
   const ip = getIp(req);
   const anon = getOrCreateAnonCookie(req);
 
+  // Invisible bot gate (Vercel BotID). No-op on localhost; enforced in prod.
+  const bot = await checkBotId();
+  if (bot.isBot) {
+    log("warn", "score.botid_blocked", { ip });
+    return NextResponse.json<ApiErrorBody>(
+      errBody("bot_detected", "Automated request blocked."),
+      { status: 403 },
+    );
+  }
+
   const contentLength = parseInt(req.headers.get("content-length") ?? "0", 10);
   if (contentLength > MAX_BODY_BYTES) {
     log("warn", "score.body_too_large", { ip, contentLength });
@@ -203,80 +210,8 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const rl = await checkRateLimit(ip, anon.value);
-  if (!rl.allowed) {
-    if (rl.reason === "minute" || rl.reason === "day") {
-      log("info", "score.rate_limited", { ip, reason: rl.reason });
-      const res = NextResponse.json<ApiErrorBody>(
-        errBody("rate_limited", `Rate limit reached: ${rl.reason}.`, rl.retryAfterSeconds),
-        { status: 429 },
-      );
-      if (anon.setCookie) res.headers.set("set-cookie", anon.setCookie);
-      return res;
-    }
-    log("warn", "score.ratelimit_infra_fail_closed", { ip });
-    const input: ScoringInput = {
-      text: body.text,
-      hasMedia: body.hasMedia,
-      videoHasAudio: body.videoHasAudio,
-      isReply: body.isReply,
-      isThread: body.isThread,
-      premiumLongPost: body.premiumLongPost,
-      newAccount: body.newAccount,
-      tweetsInLastHour: body.tweetsInLastHour,
-      targetFollowerSize: body.targetFollowerSize,
-      modelOverride: null,
-    };
-    const result = heuristicOnly({
-      input,
-      turnstileRequired: false,
-      reason: "degraded",
-      warnings: ["Rate-limit service unavailable; running heuristics only."],
-    });
-    const res = NextResponse.json(result);
-    if (anon.setCookie) res.headers.set("set-cookie", anon.setCookie);
-    return res;
-  }
-
-  const ts = await turnstileGate({
-    ip,
-    anonCookie: anon.value,
-    token: body.turnstileToken,
-  });
-  if (!ts.ok) {
-    if (ts.reason === "missing_token" || ts.reason === "siteverify_failed") {
-      log("info", "score.turnstile_block", { ip, reason: ts.reason });
-      const res = NextResponse.json<ApiErrorBody>(
-        errBody("turnstile_failed", "Bot challenge required."),
-        { status: 403 },
-      );
-      if (anon.setCookie) res.headers.set("set-cookie", anon.setCookie);
-      return res;
-    }
-    // infra_unavailable -> fail closed
-    log("warn", "score.turnstile_infra_fail_closed", { ip });
-    const input: ScoringInput = {
-      text: body.text,
-      hasMedia: body.hasMedia,
-      videoHasAudio: body.videoHasAudio,
-      isReply: body.isReply,
-      isThread: body.isThread,
-      premiumLongPost: body.premiumLongPost,
-      newAccount: body.newAccount,
-      tweetsInLastHour: body.tweetsInLastHour,
-      targetFollowerSize: body.targetFollowerSize,
-      modelOverride: null,
-    };
-    const result = heuristicOnly({
-      input,
-      turnstileRequired: true,
-      reason: "degraded",
-      warnings: ["Bot-check service unavailable; running heuristics only."],
-    });
-    const res = NextResponse.json(result);
-    if (anon.setCookie) res.headers.set("set-cookie", anon.setCookie);
-    return res;
-  }
+  // Bot protection is handled at the Vercel platform layer (BotID + Firewall
+  // rate limiting), so there's no in-app rate-limit or Turnstile gate here.
 
   let input: ScoringInput = {
     text: body.text,
@@ -315,42 +250,7 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  const togglesForCache: Record<string, boolean | number | string | null> = {
-    hasMedia: input.hasMedia,
-    videoHasAudio: input.videoHasAudio,
-    isReply: input.isReply,
-    isThread: input.isThread,
-    premiumLongPost: input.premiumLongPost,
-    newAccount: input.newAccount,
-    tweetsInLastHour: input.tweetsInLastHour,
-    targetFollowerSize: input.targetFollowerSize,
-  };
-
   const chain = byok ? [] : await resolveModelChain();
-  const modelForKey = chain[0]?.id ?? env().OPENROUTER_SCORER_MODEL;
-
-  // BYOK results are never cached — different keys produce different scores
-  // for the same input, and we don't want cross-user contamination.
-  const useCache = byok === null;
-
-  const key = cacheKey({
-    normalizedText: input.text,
-    toggles: togglesForCache,
-    modelId: modelForKey,
-  });
-  if (useCache) {
-    const cached = await cacheGet<ScoreResult>(key);
-    if (cached) {
-      log("info", "score.cache_hit", { durationMs: Date.now() - startedAt });
-      const res = NextResponse.json<ScoreResult>({
-        ...cached,
-        llmStatus: "cached",
-        turnstileRequired: ts.nextRequiresToken,
-      });
-      if (anon.setCookie) res.headers.set("set-cookie", anon.setCookie);
-      return res;
-    }
-  }
 
   const hard = runHardFilters(input);
   const content = extractContentSignals(input, hard);
@@ -360,7 +260,7 @@ export async function POST(req: Request): Promise<Response> {
     log("warn", "score.no_eligible_models");
     const result = heuristicOnly({
       input,
-      turnstileRequired: ts.nextRequiresToken,
+      turnstileRequired: false,
       reason: "degraded",
       warnings: ["No eligible scorer model available; running heuristics only.", ...byokWarnings],
     });
@@ -400,19 +300,9 @@ export async function POST(req: Request): Promise<Response> {
     input,
     llmStatus: judge.status === "degraded" ? "degraded" : judge.status === "fallback" ? "fallback" : "ok",
     modelUsed: judge.modelUsed,
-    turnstileRequired: ts.nextRequiresToken,
+    turnstileRequired: false,
     warnings: [...hard.warnings, ...byokWarnings],
   });
-
-  if (
-    useCache &&
-    judge.status === "ok" &&
-    judge.result &&
-    suggestions !== null &&
-    judge.modelUsed === modelForKey
-  ) {
-    await cacheSet(key, result, 60 * 60 * 24);
-  }
 
   log("info", "score.complete", {
     durationMs: Date.now() - startedAt,

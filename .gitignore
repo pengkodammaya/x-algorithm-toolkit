@@ -30,9 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# package manager — project uses bun; ignore others
+# package manager — project uses npm; ignore others
 yarn.lock
-package-lock.json
+bun.lock
 pnpm-lock.yaml
 
 # claude / agent artifacts (no need to publish these)

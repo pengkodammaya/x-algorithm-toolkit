@@ -112,7 +112,7 @@ export type ScoreResult = {
 };
 
 export type ApiErrorBody = {
-  error: "rate_limited" | "body_too_large" | "turnstile_failed";
+  error: "rate_limited" | "body_too_large" | "turnstile_failed" | "bot_detected";
   retryAfterSeconds?: number;
   message: string;
 };

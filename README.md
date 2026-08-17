@@ -46,55 +46,37 @@ bun run check
 Set these locally and in Vercel:
 
 ```bash
-OPENROUTER_API_KEY=...
-OPENROUTER_SCORER_MODEL=arcee-ai/trinity-large-thinking:free
-OPENROUTER_FALLBACK_MODELS=
-
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
-CACHE_HMAC_SECRET=...
-
-TURNSTILE_SECRET_KEY=...
-NEXT_PUBLIC_TURNSTILE_SITE_KEY=...
-
-CRON_SECRET=...
+GLM_API_KEY=...                                  # z.ai key — the only secret needed
+NEXT_PUBLIC_DIGISTORIES_URL=https://www.digistories.cc
 ```
 
-`CACHE_HMAC_SECRET` and `CRON_SECRET` should be fresh random values:
-
-```bash
-openssl rand -hex 32
-```
+That's it. Rate-limiting/caching/bot-gating are handled at the Vercel platform
+layer (Firewall + BotID), not by external services.
 
 ## Model Policy
 
-The site-funded OpenRouter path is hard-locked to:
-
-```text
-arcee-ai/trinity-large-thinking:free
-```
+The site-funded path is hard-locked to the free **`glm-4.5-flash`** model
+(`lib/env.ts` → `GLM_MODEL`). Bump it to `glm-4.6` for stronger judgments
+(~$0.004/score).
 
 The public API ignores `modelOverride` unless BYOK is active with all three
-fields present:
+fields present (any OpenAI-compatible provider — OpenRouter, z.ai, etc.):
 
 - `openrouterApiKey`
 - `openrouterBaseUrl`
 - `modelOverride`
 
-BYOK requests are never cached and use the user's key/quota. Server-funded
-requests are cached by a server-secret HMAC of normalized input + toggles +
-the hardcoded server model.
+BYOK requests use the user's key/quota.
 
 ## Public Launch Checklist
 
 Before going live:
 
-1. Rotate the OpenRouter key if it has appeared in any chat/log/history.
-2. Put all required env vars in Vercel production.
-3. Add the production domain to the Cloudflare Turnstile site.
-4. Set an OpenRouter credit cap and a Vercel spend cap.
-5. Confirm Vercel Cron is active for `/api/cron/spend-probe`.
-6. Run `bun run check`.
+1. Rotate the GLM key if it has appeared in any chat/log/history.
+2. Put both env vars in Vercel production.
+3. Enable Vercel Firewall rate limiting + BotID on the project.
+4. Set a Vercel spend cap (and a z.ai cap if you switch to a paid model).
+5. Run `bun run check`.
 
 ## API Behavior
 

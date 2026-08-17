@@ -5,7 +5,7 @@ import type {
 } from "openai/resources/chat/completions";
 import { z } from "zod";
 
-import { env } from "../env";
+import { env, GLM_BASE_URL } from "../env";
 import { resolveModelChain } from "./modelCapability";
 import type { ModelEntry, StructuredMode } from "./modelCapability";
 import {
@@ -76,8 +76,8 @@ let cachedClient: OpenAI | undefined;
 function client(): OpenAI {
   if (cachedClient) return cachedClient;
   cachedClient = new OpenAI({
-    apiKey: env().OPENROUTER_API_KEY,
-    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: env().GLM_API_KEY,
+    baseURL: GLM_BASE_URL,
   });
   return cachedClient;
 }
@@ -133,8 +133,11 @@ async function structuredCall(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
 
-  const isOpenRouter =
-    !params.byok || params.byok.baseUrl.includes("openrouter.ai/api/v1");
+  // The `provider` hint is OpenRouter-specific. The server path runs on GLM,
+  // so only send it when a BYOK request actually targets OpenRouter.
+  const isOpenRouter = params.byok
+    ? params.byok.baseUrl.includes("openrouter.ai")
+    : false;
   const baseBody = {
     model: params.model,
     temperature: 0,
