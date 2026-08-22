@@ -12,7 +12,7 @@ import { resolveModelChain } from "@/lib/scoring/modelCapability";
 import type { ScoringInput, ScoreResult, ApiErrorBody } from "@/lib/scoring/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const MAX_STANDARD_CHARS = 280;
 const MAX_PREMIUM_CHARS = 25_000;
